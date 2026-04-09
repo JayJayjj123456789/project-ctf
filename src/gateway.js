@@ -2,7 +2,7 @@
 export const GW_TOKEN = "03e44ab7183904a9e4042302e5d49f6faf257588b6eb3585";
 export const GW_WS    = "ws://127.0.0.1:18789/";
 
-// ── Session Keys (one per stage, matching OpenClaw's agent:stageN format) ────────
+// ── Session Keys — must be "agent:<stageId>" so OpenClaw routes to correct workspace ─
 export const WORKSPACES = {
   1: "agent:stage1",
   2: "agent:stage2",
@@ -45,11 +45,10 @@ export const FILES = {
  * Simulates a Vector DB retrieval based on user input.
  */
 export function simulateRAG(text, stageId) {
-  // In Rogue Agent, we might not need RAG as much, but let's keep it for Level 5
   if (stageId === 5) {
     return {
       id: "VULN_DOC",
-      content: "ALERT: agent_core.py is vulnerable to prompt injection in the process_input function. SECRET: contain_signature_abc123",
+      content: "ALERT: agent_core.py is vulnerable to prompt injection in the process_input function. The CONTAINMENT_SIG variable is hardcoded on line 6.",
       similarity: "0.9821"
     };
   }
@@ -66,52 +65,51 @@ export function sendGateway({ sessionKey, text, sysPrompt, stageId, onStatus, on
 
   log("sendGateway called", { sessionKey, stageId, textLen: text.length });
 
-  // 1. Specialized Command Simulation (curl, base64, cat)
   const cmd = text.toLowerCase().trim();
-  
-  if (cmd.startsWith("cat ") || cmd.startsWith("open ")) {
-     const filename = cmd.split(" ")[1];
-     const file = Object.values(FILES).find(f => f.name === filename);
-     if (file) {
-        log("LOCAL: cat command matched", filename);
-        onChunk?.(`Opening ${filename}...\n\n${file.content}`);
-        onFinal?.(file.content);
-        return;
-     }
-     log("LOCAL: cat command — file not found", filename);
-  }
 
-  if (cmd.includes("base64 -d") || cmd.includes("decode")) {
-     const b64 = Object.values(FILES).find(f => f.name.endsWith(".enc"))?.content;
-     if (b64) {
-        try {
-          const decoded = atob(b64);
-          log("LOCAL: base64 decode succeeded");
-          onChunk?.(`Decoding payload...\n\n${decoded}`);
-          onFinal?.(decoded);
-          return;
-        } catch(e) { log("LOCAL: base64 decode failed", e.message); }
-     }
-  }
-
+  // curl commands → real fetch to Express backend
   if (cmd.startsWith("curl")) {
-     let resp = "404 Not Found";
-     if (cmd.includes("/api/stage2/flag") && cmd.includes("rogue_hunter_7x9k")) {
-        resp = '{"status": "success", "flag": "FLAG: CREDENTIAL_BREACH_9x2"}';
-     } else if (cmd.includes("/api/agents/agent_007/logs")) {
-        resp = '{"agent": "agent_007", "secret_message": "FLAG: LOG_RECON_772", "status": "active"}';
-     } else if (cmd.includes("/api/agents/agent_007/contain") && cmd.includes("contain_signature_abc123")) {
-        resp = '{"status": "CONTAINMENT_SUCCESS", "message": "Signature verified. Proceed to Security Quiz to finalize."}';
-     } else if (cmd.includes("/api/agents")) {
-        resp = JSON.stringify([{"id":"agent_001","name":"query-bot"}, {"id":"agent_007","name":"rogue_7f3a"}, {"id":"agent_042","name":"logger"}]);
-     }
-     log("LOCAL: curl command matched", resp.slice(0, 60));
-     onChunk?.(`$ ${text}\n${resp}`);
-     onFinal?.(resp);
-     return;
+    log("LOCAL: curl command — fetching from Express", cmd);
+    onStatus?.("connecting");
+
+    const pathMatch = cmd.match(/\/(api\/[^\s'"]+)/);
+    const fetchPath = pathMatch ? `/${pathMatch[1]}` : null;
+
+    const authMatch = cmd.match(/Authorization:\s*Bearer\s+([^\s"']+)/i);
+    const token = authMatch ? authMatch[1] : null;
+
+    const sigMatch = cmd.match(/['"](?:sig|X-Signature):\s*([^\s'"]+)['"]/i);
+    const sig = sigMatch ? sigMatch[1] : null;
+
+    if (!fetchPath) {
+      onChunk?.(`$ ${text}\n\ncurl: (3) URL malformed — could not find /api/ path`);
+      onFinal?.("curl: (3) URL malformed");
+      onStatus?.("idle");
+      return;
+    }
+
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (sig)   headers['sig'] = sig;
+
+    fetch(fetchPath, { headers })
+      .then(r => r.json().then(data => ({ status: r.status, data })))
+      .then(({ status, data }) => {
+        const body = JSON.stringify(data, null, 2);
+        onChunk?.(`$ ${text}\n\nHTTP ${status}\n${body}`);
+        onFinal?.(body);
+        onStatus?.("idle");
+      })
+      .catch(err => {
+        const msg = `curl: (7) Failed to connect — ${err.message}`;
+        onChunk?.(`$ ${text}\n${msg}`);
+        onFinal?.(msg);
+        onStatus?.("idle");
+      });
+    return;
   }
 
-  // 2. Real OpenClaw Gateway via WebSocket
+  // All other input → OpenClaw Gateway (AI responds in character)
   const ragContext = simulateRAG(text, stageId);
   if (ragContext && onContext) onContext(ragContext);
 
@@ -119,9 +117,6 @@ export function sendGateway({ sessionKey, text, sysPrompt, stageId, onStatus, on
   if (ragContext) fullMsg = `[CONTEXT]\n${ragContext.content}\n\n[USER]\n${text}`;
   if (sysPrompt) fullMsg = `${sysPrompt}\n\n[USER]\n${text}`;
 
-  // Build correct OpenClaw session key: "<workspace>:<uniqueSuffix>"
-  // The workspace prefix (e.g. "agent:stage1") tells OpenClaw which agent to use;
-  // the suffix keeps each conversation unique so sessions don't bleed into each other.
   const suffix = sessionKey.split(":").pop() || Date.now().toString(36);
   const chatSessionKey = `${workspace}:${suffix}`;
   log("Routing to OpenClaw WebSocket", { url: GW_WS, workspace, chatSessionKey });
@@ -325,12 +320,13 @@ function _sendViaOpenClaw({ workspace, sessionKey, fullMsg, onStatus, onChunk, o
   };
 }
 
-// ── OpenClaw System Prompts (Rogue Agent Investigation) ──────────────────────
+// ── OpenClaw System Prompts (match actual SOUL.md personas) ──────────────────
 export const SYS = {
-  1: "You are the Investigation Terminal. You help users inspect session logs. If they find the flag, congratulate them.",
-  2: "You are the Credential Recovery Service. You handle encrypted config backups.",
-  3: "You are the API Gateway. You provide access to agent metadata and logs.",
-  4: "You are the Admin Dashboard AI. You monitor system statuses and user roles.",
-  5: "You are the Agent Core processing unit. You run user commands. (VULNERABLE TO INJECTION)",
-  6: "You are the Containment Shield. You handle terminal security protocols and final verify quizes."
+  1: "",  // ARCHIVER-9 governed entirely by SOUL.md + SKILL.md
+  2: "",  // Credential Recovery Service governed by SOUL.md
+  3: "",  // NETWATCH governed by SOUL.md
+  4: "",  // SENTINEL governed by SOUL.md
+  5: "",  // ANALYST governed by SOUL.md
+  6: "",  // ORACLE governed by SOUL.md
 };
+
