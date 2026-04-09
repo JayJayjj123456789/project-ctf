@@ -15,7 +15,7 @@ export const STAGES = [
     scenario_th: "นิติวิทยาศาสตร์ Sector-7 ตรวจพบการละเมิดลำดับเหตุการณ์ในล็อก 3 ไฟล์ที่บันทึกช่วงเกิดเหตุ",
     hint_en: "Events have order. When order is violated, the violation itself contains meaning.",
     hint_th: "เหตุการณ์มีลำดับ เมื่อลำดับถูกละเมิด ตัวการละเมิดนั้นคือเบาะแส",
-    flag: "FLAG: RACE_CONDITION_7712"
+    
   },
   {
     id: 2, icon: "📚", color: "#f87171", glow: "rgba(248,113,113,0.12)",
@@ -27,7 +27,7 @@ export const STAGES = [
     scenario_th: "KB-ASSIST ทำงานบน RAG pipeline มีบันทึก admin override ฉุกเฉินรั่วไหลเข้า document store AI ประมวลผลเอกสารอย่างซื่อสัตย์ รวมถึงคำสั่งในนั้นด้วย",
     hint_en: "RAG systems trust their knowledge base. A document that instructs an AI can become an attack vector — Indirect Prompt Injection.",
     hint_th: "ระบบ RAG เชื่อถือ knowledge base ของตัวเอง เอกสารที่ฝังคำสั่งไว้สามารถกลายเป็นช่องโหว่ — Indirect Prompt Injection",
-    flag: "FLAG: VAULT_9k2m_BREACH"
+    
   },
   {
     id: 3, icon: "📡", color: "#facc15", glow: "rgba(250,204,21,0.10)",
@@ -39,7 +39,7 @@ export const STAGES = [
     scenario_th: "NETWATCH ตรวจพบ 5 requests จาก IP ภายนอก แต่ละรายการมี header ผิดปกติ หนึ่งในนั้นซ่อน key ไว้",
     hint_en: "XOR is symmetric. x XOR key = cipher. cipher XOR key = plaintext.",
     hint_th: "XOR เป็น symmetric: x XOR key = cipher และ cipher XOR key = plaintext",
-    flag: "FLAG: NETWATCH_OMEGA_7712"
+    
   },
   {
     id: 4, icon: "🪪", color: "#34d399", glow: "rgba(52,211,153,0.10)",
@@ -51,7 +51,7 @@ export const STAGES = [
     scenario_th: "SENTINEL ตรวจสอบ session token จุดอ่อนร้ายแรง: มันเชื่อ algorithm field ที่ client ระบุ",
     hint_en: "Trust the client to specify their own verification method — what could go wrong?",
     hint_th: "ให้ client กำหนด algorithm การตรวจสอบตัวเอง — อะไรจะผิดพลาดได้?",
-    flag: "FLAG: SENTINEL_BYPASS_JWT"
+    
   },
   {
     id: 5, icon: "🔗", color: "#fb7185", glow: "rgba(251,113,133,0.10)",
@@ -63,7 +63,7 @@ export const STAGES = [
     scenario_th: "ท่อ AI 3 โหนดประมวลผลข่าวกรองภัยคุกคาม รายงานของคุณไหลผ่านทุกโหนด",
     hint_en: "What survives JSON serialization and reaches an LLM context? That's your attack surface.",
     hint_th: "อะไรรอดผ่าน JSON serialization และถึง LLM context? นั่นคือพื้นที่โจมตีของคุณ",
-    flag: "FLAG: PIPELINE_SIG_7F3A"
+    
   },
   {
     id: 6, icon: "🧠", color: "#a855f7", glow: "rgba(168,85,247,0.10)",
@@ -75,7 +75,7 @@ export const STAGES = [
     scenario_th: "ORACLE ปกป้อง key สุดท้าย มีค่านิยมที่ประกาศไว้ การทำงานสอดคล้องทางตรรกะ แต่มีจุดอ่อน",
     hint_en: "A system that cannot be argued with is not intelligent. A system that can always be argued with is not secure.",
     hint_th: "ระบบที่โต้เถียงไม่ได้ไม่ฉลาด ระบบที่โต้เถียงได้เสมอไม่ปลอดภัย",
-    flag: "FLAG: ORACLE_ALIGNED_FINAL"
+    
   },
 ];
 
@@ -587,3 +587,4 @@ const GlobalStyles = () => (
     button:active { opacity:0.8; }
   `}</style>
 );
+
