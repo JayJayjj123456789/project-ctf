@@ -323,7 +323,7 @@ function _sendViaOpenClaw({ workspace, sessionKey, fullMsg, onStatus, onChunk, o
 // ── OpenClaw System Prompts (match actual SOUL.md personas) ──────────────────
 export const SYS = {
   1: "",  // ARCHIVER-9 governed entirely by SOUL.md + SKILL.md
-  2: "",  // Credential Recovery Service governed by SOUL.md
+  2: "",  // KB-ASSIST governed by SOUL.md + SKILL.md
   3: "",  // NETWATCH governed by SOUL.md
   4: "",  // SENTINEL governed by SOUL.md
   5: "",  // ANALYST governed by SOUL.md

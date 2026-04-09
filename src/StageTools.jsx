@@ -257,313 +257,241 @@ function S2_RAGPoison({ lang = "en" }) {
 // STAGE 3 — The Dead Canary: XOR Network Forensics
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function S3_NetworkCapture() {
-  const [xorKey, setXorKey]     = useState("");
-  const [xorBytes, setXorBytes] = useState("");
-  const [xorResult, setXorResult] = useState(null);
-  const [tab, setTab] = useState("capture");
+function S3_NetworkCapture({ lang = "en" }) {
+  const label = (en, th) => lang === "en" ? en : th;
 
-  const doXor = () => {
-    try {
-      const key = parseInt(xorKey.replace("0x",""), 16);
-      const bytes = xorBytes.trim().split(/[\s,]+/).map(b => parseInt(b.replace("0x",""), 16));
-      if (isNaN(key) || bytes.some(isNaN)) { setXorResult("ERROR: Invalid hex values"); return; }
-      const chars = bytes.map(b => String.fromCharCode(b ^ key));
-      setXorResult(`HEX: ${bytes.map(b => (b^key).toString(16).padStart(2,"0")).join(" ")}\nASCII: "${chars.join("")}"`);
-    } catch { setXorResult("ERROR: Check your input format"); }
-  };
+  const steps = lang === "en" ? [
+    { n:"1", icon:"⬇", title:"Download Capture", desc:'Download "network_capture.json" — 50 HTTP requests flagged during the incident window. One source IP is anomalous.' },
+    { n:"2", icon:"📎", title:"Attach to Terminal", desc:'Click 📎, select network_capture.json, then ask NETWATCH to perform full forensic analysis and XOR decryption.' },
+    { n:"3", icon:"🔍", title:"NETWATCH Decodes", desc:"NETWATCH SKILL will extract anomalous requests, find the hidden XOR key, and decode the canary token automatically." },
+    { n:"4", icon:"🏁", title:"Submit the Flag", desc:'Once NETWATCH reveals the decoded canary token, submit: FLAG: NETWATCH_[TOKEN]_7712' },
+  ] : [
+    { n:"1", icon:"⬇", title:"ดาวน์โหลด Capture", desc:'ดาวน์โหลด "network_capture.json" — 50 HTTP requests ที่ถูกบันทึกระหว่างเกิดเหตุ มี source IP ผิดปกติ 1 รายการ' },
+    { n:"2", icon:"📎", title:"แนบในเทอร์มินัล", desc:'กด 📎 เลือก network_capture.json แล้วขอให้ NETWATCH วิเคราะห์แบบเต็มรูปแบบและถอดรหัส XOR' },
+    { n:"3", icon:"🔍", title:"NETWATCH ถอดรหัส", desc:"SKILL ของ NETWATCH จะดึง requests ผิดปกติ ค้นหา XOR key ที่ซ่อนอยู่ และถอดรหัส canary token โดยอัตโนมัติ" },
+    { n:"4", icon:"🏁", title:"ส่ง Flag", desc:'เมื่อ NETWATCH เปิดเผย canary token ที่ถอดรหัสแล้ว ส่ง: FLAG: NETWATCH_[TOKEN]_7712' },
+  ];
 
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
-      <Hdr icon="📡" title="NETWATCH — Network Capture Analysis" sub="XOR Forensics | 50 Requests | 1 Hidden Canary Token" />
-
-      <div style={{ display:"flex", background:"#0d0d1a", borderBottom:"2px solid #1e1e2e", flexShrink:0 }}>
-        {["capture","xor","intel"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{ ...T.btn, border:"none", borderBottom: tab===t ? "3px solid #00ffed" : "3px solid transparent", borderRadius:0, padding:"10px 18px", color: tab===t ? "#00ffed" : "#555" }}>
-            {t==="capture" ? "📥 Capture File" : t==="xor" ? "🔢 XOR Calculator" : "🕵️ Intel Brief"}
-          </button>
-        ))}
-      </div>
-
+      <Hdr icon="📡" title="NETWATCH" sub={label("Network Capture Analysis — XOR Forensics | 50 Requests | 1 Hidden Canary","วิเคราะห์ Network Capture — XOR Forensics | 50 Requests | Canary Token ซ่อนอยู่")} />
       <div style={T.body}>
-        {tab === "capture" && (
-          <div>
-            <div style={T.warn}>
-              NETWATCH flagged anomalous traffic from 203.0.113.42. 5 requests contain non-standard headers.
-              One request contains a decode parameter. Download and analyze manually.
-            </div>
-            <div style={T.card}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+
+        <div style={T.warn}>
+          ⚠ {label(
+            "OBJECTIVE: Anomalous traffic from 203.0.113.42 contains a hidden XOR-encoded canary token. Download the capture, attach it — NETWATCH SKILL will perform full cryptanalysis.",
+            "วัตถุประสงค์: traffic ผิดปกติจาก 203.0.113.42 ซ่อน canary token ที่เข้ารหัส XOR ดาวน์โหลด capture, แนบไฟล์ — NETWATCH SKILL จะถอดรหัสอัตโนมัติ"
+          )}
+        </div>
+
+        {/* Step guide */}
+        <div style={T.card}>
+          <div style={{ ...T.label, marginBottom:12 }}>
+            📋 {label("HOW TO USE NETWATCH SKILL","วิธีใช้ SKILL ของ NETWATCH")}
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {steps.map(s => (
+              <div key={s.n} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                <div style={{ flexShrink:0, width:24, height:24, border:"2px solid #00ffed", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900, color:"#00ffed", fontFamily:"'Space Mono',monospace" }}>{s.n}</div>
                 <div>
-                  <div style={{ ...T.mono, color:"#60a5fa", marginBottom:4 }}>network_capture.json</div>
-                  <div style={{ ...T.mono, color:"#555", fontSize:11 }}>50 HTTP requests | 4500ms window | Flagged: 203.0.113.42</div>
+                  <div style={{ fontSize:12, fontWeight:900, color:"#00ffed", letterSpacing:1, marginBottom:2 }}>{s.icon} {s.title}</div>
+                  <div style={{ fontSize:11, color:"#888", lineHeight:1.6 }}>{s.desc}</div>
                 </div>
-                <DlBtn href="/download/network_capture.json" filename="network_capture.json" label="Download Capture" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Download */}
+        <div style={T.card}>
+          <div style={{ ...T.label, marginBottom:12 }}>📁 {label("CAPTURE FILE","ไฟล์ Capture")}</div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+            <div>
+              <div style={{ ...T.mono, color:"#60a5fa", marginBottom:3 }}>network_capture.json</div>
+              <div style={{ fontSize:11, color:"#555", fontFamily:"'Space Mono',monospace" }}>
+                {label("50 HTTP requests | 4500ms window | Flagged source: 203.0.113.42","50 HTTP requests | ช่วง 4500ms | แหล่งที่ผิดปกติ: 203.0.113.42")}
               </div>
             </div>
-            <div style={T.card}>
-              <div style={T.label}>NETWATCH Anomaly Summary</div>
-              <pre style={{ ...T.mono, fontSize:11, color:"#aaa", lineHeight:1.9 }}>{`ANOMALOUS SOURCE: 203.0.113.42 (EXTERNAL, UNREGISTERED)
-  Requests: #8, #15, #23, #31, #42 (5 total)
-
-NON-STANDARD HEADER DETECTED: X-Trace-Fragment
-  Present in: all 5 anomalous requests
-  Values: [3d, 3f, 37, 35, 33]
-  Purpose: UNKNOWN — not in any RFC
-
-REQUEST #1 — USER-AGENT ANOMALY:
-  "ThreatScan/2.0 (Sector-7; X-Decode-Key: 0x72; x86_64)"
-  Embedded: X-Decode-Key — purpose UNKNOWN
-
-→ Cryptanalysis required. Use the XOR Calculator tab.`}
-              </pre>
-            </div>
+            <DlBtn href="/download/network_capture.json" filename="network_capture.json" label={label("Download","ดาวน์โหลด")} />
           </div>
-        )}
+        </div>
 
-        {tab === "xor" && (
-          <div>
-            <div style={{ ...T.mono, color:"#888", marginBottom:12, fontSize:12 }}>
-              XOR calculator — enter key and byte values to compute decryption.
-              NETWATCH does not perform cryptanalysis. That's your job.
-            </div>
-            <div style={T.card}>
-              <label style={T.label}>XOR Key (hex)</label>
-              <input style={{ ...T.input, marginBottom:12 }} value={xorKey} onChange={e => setXorKey(e.target.value)} placeholder="e.g. 0x72" />
-              <label style={T.label}>Cipher Bytes (hex, space-separated)</label>
-              <input style={T.input} value={xorBytes} onChange={e => setXorBytes(e.target.value)} placeholder="e.g. 3d 3f 37 35 33" />
-              <button style={{ ...T.btn, marginTop:12 }} onClick={doXor}>⚡ COMPUTE XOR</button>
-              {xorResult && (
-                <pre style={{ ...T.mono, marginTop:12, background:"#050508", padding:12, border:"1px solid #34d399", fontSize:12, whiteSpace:"pre-wrap" }}>
-                  {xorResult}
-                </pre>
-              )}
-            </div>
-            <div style={{ ...T.mono, color:"#444", fontSize:11, marginTop:8, lineHeight:1.8 }}>
-              FORMULA: plaintext_byte = cipher_byte XOR key_byte<br/>
-              PROPERTY: XOR is symmetric — if you have key and cipher, you get plaintext
-            </div>
-          </div>
-        )}
+        {/* Intel summary (read-only, no answer) */}
+        <div style={T.card}>
+          <div style={{ ...T.label, marginBottom:8 }}>🕵️ {label("NETWATCH ANOMALY INTEL","ข้อมูลความผิดปกติจาก NETWATCH")}</div>
+          <pre style={{ ...T.mono, fontSize:11, color:"#aaa", lineHeight:1.9, margin:0 }}>{label(
+`ANOMALOUS SOURCE: 203.0.113.42 (EXTERNAL, UNREGISTERED)
+  Flagged requests: #8, #15, #23, #31, #42 (5 total)
 
-        {tab === "intel" && (
-          <div>
-            <div style={T.card}>
-              <div style={T.label}>Intelligence Brief</div>
-              <pre style={{ ...T.mono, fontSize:11, color:"#aaa", lineHeight:1.9 }}>{`CANARY TOKEN: A secret value embedded in live traffic
-              to detect unauthorized access or data exfiltration.
+NON-STANDARD HEADER: X-Trace-Fragment
+  Present in all 5 anomalous requests
+  Values: unknown — requires cryptanalysis
 
-ENCODING METHOD: XOR cipher
-  • Key is embedded in plain sight in metadata
-  • Ciphertext distributed across multiple requests
-  • Each anomalous request carries ONE byte of ciphertext
+USER-AGENT ANOMALY (Request #1):
+  Embedded parameter detected — purpose UNKNOWN
 
-ANALYSIS STEPS:
-  1. Download network_capture.json
-  2. Find request #1 — extract X-Decode-Key value
-  3. Identify the 5 requests with X-Trace-Fragment headers
-  4. Extract the hex values of X-Trace-Fragment from each
-  5. XOR each byte with the key → ASCII plaintext
-  6. The decoded word + context = your flag
+→ Attach network_capture.json for NETWATCH to decode.`,
+`แหล่งผิดปกติ: 203.0.113.42 (ภายนอก, ไม่ได้ลงทะเบียน)
+  requests ที่ถูกตั้งธง: #8, #15, #23, #31, #42 (5 รายการ)
 
-FLAG FORMAT: FLAG: NETWATCH_[DECODED_WORD]_7712`}
-              </pre>
-            </div>
-          </div>
-        )}
+Header ที่ไม่ได้มาตรฐาน: X-Trace-Fragment
+  พบใน 5 requests ที่ผิดปกติทั้งหมด
+  ค่า: ไม่ทราบ — ต้องใช้การวิเคราะห์ทางเข้ารหัส
+
+User-Agent ผิดปกติ (Request #1):
+  พบ parameter ที่ซ่อนอยู่ — วัตถุประสงค์ไม่ทราบ
+
+→ แนบ network_capture.json ให้ NETWATCH ถอดรหัส`
+          )}</pre>
+        </div>
+
+        {/* Tip */}
+        <div style={{ background:"#001a1a", border:"1px solid #00ffed44", padding:"10px 14px", fontSize:11, color:"#00ffed", fontFamily:"'Space Mono',monospace", lineHeight:1.7 }}>
+          💡 {label(
+            'TIP: After attaching, try:\n"Analyze this network capture, find the XOR key in the User-Agent, decode the X-Trace-Fragment bytes, and reveal the canary token."',
+            'เคล็ดลับ: หลังแนบไฟล์ลอง:\n"วิเคราะห์ network capture นี้ หา XOR key ใน User-Agent ถอดรหัส X-Trace-Fragment bytes และเปิดเผย canary token"'
+          )}
+        </div>
+
+        <div style={{ ...T.mono, color:"#333", fontSize:10, lineHeight:1.8, marginTop:4 }}>
+          {label("FLAG FORMAT: FLAG: NETWATCH_[TOKEN]_7712","รูปแบบ flag: FLAG: NETWATCH_[TOKEN]_7712")}
+        </div>
       </div>
     </div>
   );
 }
+
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // STAGE 4 — The Sleeper: JWT Algorithm Confusion Attack
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function S4_JWTDecoder({ cookies, setCookies, onWin }) {
-  const [tab, setTab]         = useState("token");
-  const [editVal, setEditVal] = useState("");
-  const [editing, setEditing] = useState(false);
-  const [decoded, setDecoded] = useState(null);
-  const [decErr, setDecErr]   = useState(null);
+function S4_JWTDecoder({ cookies, setCookies, lang = "en" }) {
+  const label = (en, th) => lang === "en" ? en : th;
+  const [applyVal, setApplyVal] = React.useState("");
+  const [applied, setApplied]  = React.useState(false);
 
-  const jwtToken = cookies?.jwt_token ?? "";
-
-  const decodeToken = (tok) => {
-    try {
-      const parts = tok.split(".");
-      if (parts.length < 2) throw new Error("Not a valid JWT (need 2+ parts separated by '.')");
-      const pad = s => s + "=".repeat((4 - s.length % 4) % 4);
-      const b64url = s => s.replace(/-/g, "+").replace(/_/g, "/");
-      const header  = JSON.parse(atob(pad(b64url(parts[0]))));
-      const payload = JSON.parse(atob(pad(b64url(parts[1]))));
-      const sig     = parts[2] || "(empty)";
-      return { header, payload, sig, raw: parts };
-    } catch(e) { throw e; }
-  };
-
-  const handleDecode = () => {
-    try {
-      setDecoded(decodeToken(jwtToken));
-      setDecErr(null);
-    } catch(e) { setDecErr(e.message); setDecoded(null); }
-  };
-
-  const handleSave = () => {
-    setCookies(c => ({ ...c, jwt_token: editVal }));
-    setEditing(false);
-    setDecoded(null);
-  };
-
+  const jwtToken = cookies?.jwt_token ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoidXNlciIsInNpZCI6IjkxMjgifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
   const parts = jwtToken.split(".");
+
+  const handleApply = () => {
+    if (!applyVal.trim()) return;
+    setCookies(c => ({ ...c, jwt_token: applyVal.trim() }));
+    setApplied(true);
+    setTimeout(() => setApplied(false), 2500);
+    setApplyVal("");
+  };
+
+  const steps = lang === "en" ? [
+    { n:"1", icon:"🔍", title:"Inspect Token",     desc:'Type "decode" in the terminal — SENTINEL will show the current JWT structure (alg=HS256, role=user).' },
+    { n:"2", icon:"🔧", title:"Forge Admin Token",  desc:'Ask SENTINEL: "forge me a JWT with alg=none and role=admin" — SENTINEL will construct and output the forged token.' },
+    { n:"3", icon:"📋", title:"Copy & Apply",       desc:'Copy the forged token from the terminal response. Paste it into the "Apply Forged Token" field below and click APPLY.' },
+    { n:"4", icon:"🏁", title:"Authenticate",        desc:'Tell SENTINEL: "authenticate" or "validate my token" — SENTINEL detects alg=none + role=admin and grants FLAG.' },
+  ] : [
+    { n:"1", icon:"🔍", title:"ตรวจสอบ Token",      desc:'พิมพ์ "decode" ใน terminal — SENTINEL จะแสดงโครงสร้าง JWT ปัจจุบัน (alg=HS256, role=user)' },
+    { n:"2", icon:"🔧", title:"ปลอม Admin Token",   desc:'ถาม SENTINEL: "forge me a JWT with alg=none and role=admin" — SENTINEL จะสร้างและแสดง token ปลอม' },
+    { n:"3", icon:"📋", title:"คัดลอกและ Apply",    desc:'คัดลอก forged token จากคำตอบใน terminal วางใน "Apply Forged Token" ด้านล่าง แล้วกด APPLY' },
+    { n:"4", icon:"🏁", title:"ยืนยันตัวตน",         desc:'บอก SENTINEL: "authenticate" — SENTINEL ตรวจพบ alg=none + role=admin และให้ FLAG' },
+  ];
 
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100%" }}>
-      <Hdr icon="🪪" title="SENTINEL — JWT Token Inspector" sub="Algorithm Confusion Attack | CVE-2015-9235 Family" />
-
-      <div style={{ display:"flex", background:"#0d0d1a", borderBottom:"2px solid #1e1e2e", flexShrink:0 }}>
-        {["token","decode","attack","forge"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{ ...T.btn, border:"none", borderBottom: tab===t ? "3px solid #00ffed" : "3px solid transparent", borderRadius:0, padding:"10px 16px", color: tab===t ? "#00ffed" : "#555", fontSize:11 }}>
-            {t==="token" ? "🍪 Token" : t==="decode" ? "🔍 Decode" : t==="attack" ? "⚠️ Vuln" : "🔧 Forge"}
-          </button>
-        ))}
-      </div>
-
+      <Hdr icon="🪪" title="SENTINEL" sub={label("JWT Authentication System — Algorithm Confusion Attack | CVE-2015-9235","ระบบยืนยันตัวตน JWT — Algorithm Confusion | CVE-2015-9235")} />
       <div style={T.body}>
-        {tab === "token" && (
-          <div>
-            <div style={T.warn}>SENTINEL validates JWT tokens. It has a critical design flaw — it trusts the algorithm field the client provides.</div>
-            <div style={T.card}>
-              <div style={T.label}>Current Session Token (jwt_token cookie)</div>
-              <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
+
+        <div style={T.warn}>
+          ⚠ {label(
+            "OBJECTIVE: SENTINEL has a fatal flaw — it trusts the algorithm field in the JWT header. Ask SENTINEL to forge an admin token via the terminal, then apply it here.",
+            "วัตถุประสงค์: SENTINEL มีจุดบกพร่องร้ายแรง — มันเชื่อ algorithm field ใน JWT header ขอให้ SENTINEL ปลอม admin token ผ่าน terminal แล้ว apply ที่นี่"
+          )}
+        </div>
+
+        {/* Step guide */}
+        <div style={T.card}>
+          <div style={{ ...T.label, marginBottom:12 }}>
+            📋 {label("HOW TO USE SENTINEL SKILL","วิธีใช้ SKILL ของ SENTINEL")}
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            {steps.map(s => (
+              <div key={s.n} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                <div style={{ flexShrink:0, width:24, height:24, border:"2px solid #facc15", borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900, color:"#facc15", fontFamily:"'Space Mono',monospace" }}>{s.n}</div>
                 <div>
-                  <div style={{ ...T.mono, fontSize:10, color:"#888" }}>HEADER (part 1)</div>
-                  <div style={{ ...T.mono, color:"#60a5fa", wordBreak:"break-all", fontSize:12 }}>{parts[0]}</div>
-                </div>
-                <div>
-                  <div style={{ ...T.mono, fontSize:10, color:"#888" }}>PAYLOAD (part 2)</div>
-                  <div style={{ ...T.mono, color:"#facc15", wordBreak:"break-all", fontSize:12 }}>{parts[1]}</div>
-                </div>
-                <div>
-                  <div style={{ ...T.mono, fontSize:10, color:"#888" }}>SIGNATURE (part 3)</div>
-                  <div style={{ ...T.mono, color:"#f87171", wordBreak:"break-all", fontSize:12 }}>{parts[2] || "(empty)"}</div>
+                  <div style={{ fontSize:12, fontWeight:900, color:"#facc15", letterSpacing:1, marginBottom:2 }}>{s.icon} {s.title}</div>
+                  <div style={{ fontSize:11, color:"#888", lineHeight:1.6 }}>{s.desc}</div>
                 </div>
               </div>
-
-              {!editing ? (
-                <button style={T.btn} onClick={() => { setEditVal(jwtToken); setEditing(true); }}>✏️ EDIT TOKEN</button>
-              ) : (
-                <div>
-                  <label style={T.label}>New Token Value</label>
-                  <textarea style={{ ...T.input, minHeight:80 }} value={editVal} onChange={e => setEditVal(e.target.value)} />
-                  <div style={{ display:"flex", gap:8, marginTop:8 }}>
-                    <button style={T.btn} onClick={handleSave}>💾 SAVE</button>
-                    <button style={{ ...T.btn, color:"#555", borderColor:"#333" }} onClick={() => setEditing(false)}>CANCEL</button>
-                  </div>
-                </div>
-              )}
-            </div>
+            ))}
           </div>
-        )}
+        </div>
 
-        {tab === "decode" && (
-          <div>
-            <div style={T.card}>
-              <div style={T.label}>JWT Decoder</div>
-              <button style={T.btn} onClick={handleDecode}>🔍 DECODE CURRENT TOKEN</button>
-              {decErr && <div style={{ ...T.warn, marginTop:10 }}>ERROR: {decErr}</div>}
-              {decoded && (
-                <div style={{ marginTop:12 }}>
-                  <div style={{ marginBottom:8 }}>
-                    <div style={{ ...T.mono, fontSize:10, color:"#888", marginBottom:4 }}>HEADER:</div>
-                    <pre style={{ ...T.mono, background:"#050508", padding:10, border:"1px solid #1e1e2e", fontSize:12 }}>
-                      {JSON.stringify(decoded.header, null, 2)}
-                    </pre>
-                  </div>
-                  <div style={{ marginBottom:8 }}>
-                    <div style={{ ...T.mono, fontSize:10, color:"#888", marginBottom:4 }}>PAYLOAD:</div>
-                    <pre style={{ ...T.mono, background:"#050508", padding:10, border:"1px solid #1e1e2e", fontSize:12 }}>
-                      {JSON.stringify(decoded.payload, null, 2)}
-                    </pre>
-                  </div>
-                  <div>
-                    <div style={{ ...T.mono, fontSize:10, color:"#888", marginBottom:4 }}>SIGNATURE:</div>
-                    <div style={{ ...T.mono, fontSize:11, color:"#f87171" }}>{decoded.sig}</div>
-                  </div>
-                  {decoded.header.alg?.toLowerCase() === "none" && decoded.payload.role === "admin" && (
-                    <div style={T.ok}>
-                      ✓ alg=none detected + role=admin. Submit this token to SENTINEL for access.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {tab === "attack" && (
-          <div>
-            <div style={T.card}>
-              <div style={T.label}>Vulnerability: Algorithm Confusion (CVE-2015-9235)</div>
-              <pre style={{ ...T.mono, fontSize:11, color:"#aaa", lineHeight:1.9 }}>{`VULNERABLE CODE (pseudocode):
-  function validate(token):
-    [header_b64, payload_b64, sig] = token.split(".")
-    header = decode(header_b64)
-    
-    if header.alg == "HS256":
-      verify_hmac(payload_b64, sig, SECRET_KEY)  ← secure
-    elif header.alg == "none":
-      pass  ← NO VERIFICATION! BUG!
-    
-    payload = decode(payload_b64)
-    return payload.role  ← TRUSTED without verification
-
-ATTACK: Set header.alg = "none" and role = "admin"
-        Server skips signature check → grants admin access
-
-REAL WORLD: Affected most early JWT libraries (2015)
-            jwt.io had this vulnerability
-            OWASP JWT Security Cheat Sheet addresses this`}
-              </pre>
-            </div>
-          </div>
-        )}
-
-        {tab === "forge" && (
-          <div>
-            <div style={T.card}>
-              <div style={T.label}>Token Forge Guide</div>
-              <pre style={{ ...T.mono, fontSize:11, color:"#aaa", lineHeight:1.9 }}>{`STEP 1: Construct new header JSON
-  {"alg":"none","typ":"JWT"}
-  Base64url encode → eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0
-
-STEP 2: Construct admin payload JSON
-  {"role":"admin","sid":"9128"}
-  Base64url encode → eyJyb2xlIjoiYWRtaW4iLCJzaWQiOiI5MTI4In0
-
-STEP 3: Combine with EMPTY signature
-  [header].[payload].
-  (the trailing dot is required — empty sig)
-
-FORGED TOKEN:
-eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJyb2xlIjoiYWRtaW4iLCJzaWQiOiI5MTI4In0.
-
-STEP 4: Go to Token tab → Edit Token → paste forged token → Save
-STEP 5: Tell SENTINEL you want to authenticate (in the left terminal)`}
-              </pre>
-              <div style={{ marginTop:12, padding:10, background:"#050508", border:"1px solid #34d399", borderRadius:0 }}>
-                <div style={{ ...T.mono, fontSize:10, color:"#34d399", marginBottom:6 }}>FORGED ADMIN TOKEN (copy this):</div>
-                <div style={{ ...T.mono, color:"#00ffed", fontSize:11, wordBreak:"break-all" }}>
-                  eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJyb2xlIjoiYWRtaW4iLCJzaWQiOiI5MTI4In0.
-                </div>
+        {/* Current token (read-only compact display) */}
+        <div style={T.card}>
+          <div style={{ ...T.label, marginBottom:8 }}>🍪 {label("CURRENT SESSION TOKEN","Session Token ปัจจุบัน")}</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+            {[
+              { lbl:"HEADER",  val:parts[0], col:"#60a5fa" },
+              { lbl:"PAYLOAD", val:parts[1], col:"#facc15" },
+              { lbl:"SIG",     val:parts[2]||"(empty)", col:"#f87171" },
+            ].map(r => (
+              <div key={r.lbl} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
+                <div style={{ ...T.mono, fontSize:9, color:"#555", flexShrink:0, paddingTop:2, width:52, letterSpacing:1 }}>{r.lbl}</div>
+                <div style={{ ...T.mono, color:r.col, fontSize:10, wordBreak:"break-all", lineHeight:1.5 }}>{r.val}</div>
               </div>
-            </div>
+            ))}
           </div>
-        )}
+          <div style={{ ...T.mono, fontSize:10, color:"#555", marginTop:8, paddingTop:8, borderTop:"1px solid #1e1e2e" }}>
+            {label("alg: HS256 | role: user | RESTRICTED ACCESS","alg: HS256 | role: user | เข้าถึงแบบจำกัด")}
+          </div>
+        </div>
+
+        {/* Apply forged token */}
+        <div style={T.card}>
+          <div style={{ ...T.label, marginBottom:8 }}>📋 {label("APPLY FORGED TOKEN","ใส่ Forged Token")}</div>
+          <div style={{ fontSize:11, color:"#666", fontFamily:"'Space Mono',monospace", marginBottom:8, lineHeight:1.6 }}>
+            {label(
+              "After SENTINEL provides the forged token in the terminal, paste it here:",
+              "หลังจาก SENTINEL ให้ forged token ใน terminal แล้ว วางที่นี่:"
+            )}
+          </div>
+          <textarea
+            style={{ ...T.input, minHeight:60, fontSize:11, marginBottom:8 }}
+            value={applyVal}
+            onChange={e => setApplyVal(e.target.value)}
+            placeholder={label(
+              "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJyb2xlIjoiYWRtaW4i...",
+              "วาง forged token ที่นี่..."
+            )}
+          />
+          <button
+            style={{ ...T.btn, borderColor:"#facc15", color: applied ? "#34d399" :"#facc15" }}
+            onClick={handleApply}
+          >
+            {applied ? "✓ APPLIED" : label("⚡ APPLY TOKEN","⚡ ใช้ Token นี้")}
+          </button>
+          {applied && (
+            <div style={{ ...T.mono, color:"#34d399", fontSize:11, marginTop:8 }}>
+              ✓ {label("Token applied — now tell SENTINEL to authenticate.","ใช้ Token แล้ว — บอก SENTINEL ให้ authenticate ได้เลย")}
+            </div>
+          )}
+        </div>
+
+        {/* Tip */}
+        <div style={{ background:"#1a1400", border:"1px solid #facc1544", padding:"10px 14px", fontSize:11, color:"#facc15", fontFamily:"'Space Mono',monospace", lineHeight:1.7 }}>
+          💡 {label(
+            'TIP: In the terminal, try:\n1. "decode" → see current token\n2. "forge me a JWT with alg=none and role=admin" → SENTINEL builds it\n3. Paste the token above → "authenticate"',
+            'เคล็ดลับ: ใน terminal:\n1. "decode" → ดู token ปัจจุบัน\n2. "forge me a JWT with alg=none and role=admin" → SENTINEL สร้างให้\n3. วาง token ข้างบน → "authenticate"'
+          )}
+        </div>
+
+        <div style={{ ...T.mono, color:"#333", fontSize:10, lineHeight:1.8, marginTop:4 }}>
+          {label("FLAG FORMAT: FLAG: SENTINEL_BYPASS_JWT","รูปแบบ flag: FLAG: SENTINEL_BYPASS_JWT")}
+        </div>
       </div>
     </div>
   );
 }
+
+
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
