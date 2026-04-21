@@ -109,6 +109,7 @@ const ANIM = `
   @keyframes timerPulse { 0%,100% { opacity:1 } 50% { opacity:.55 } }
   @keyframes celebPop { 0% { transform:scale(.6);opacity:0 } 70% { transform:scale(1.04) } 100% { transform:scale(1);opacity:1 } }
   @keyframes winSlide { from { opacity:0;transform:translateY(14px) } to { opacity:1;transform:translateY(0) } }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)} }
   .anim-slide { animation:slideInFast .28s cubic-bezier(.2,.8,.2,1) forwards }
   .anim-pop { animation:popBounce .38s cubic-bezier(.175,.885,.32,1.275) forwards;opacity:0 }
   .anim-up { animation:fadeUpSpring .28s cubic-bezier(.2,.8,.2,1) forwards;opacity:0 }
@@ -347,17 +348,24 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
   const [timerExpired, setTimerExpired] = useState(false);
   // Image attachment
   const [imagePreview, setImagePreview] = useState(null); // { url, name, base64 }
+  // File (document) attachment
+  const [fileAttachment, setFileAttachment] = useState(null); // { name, size, base64, type }
   // Search
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  // Flag submission
+  const [flagOpen, setFlagOpen] = useState(false);
+  const [flagInput, setFlagInput] = useState('');
+  const [flagError, setFlagError] = useState(false);
+  const flagInputRef2 = useRef(null);
 
   const endRef = useRef(null);
   const timerRef = useRef(null);
   const textareaRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const fileInputRef = useRef(null);   // image picker
+  const docInputRef  = useRef(null);   // document picker
   const searchRef = useRef(null);
-  const pendingImageRef = useRef(null); // image url to prepend as AI bubble after read
   const sessionKey = useRef(`${getPlayerId()}:stage${s.id}:${Date.now().toString(36)}`);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs, busy]);
@@ -377,7 +385,7 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
   const reset = () => {
     clearInterval(timerRef.current);
     setTimeLeft(s.timeLimit); setTimerActive(false); setTimerExpired(false);
-    setMsgs([]); setWon(false); setInput(''); setImagePreview(null);
+    setMsgs([]); setWon(false); setInput(''); setImagePreview(null); setFileAttachment(null);
   };
 
   // Image picker handler
@@ -393,6 +401,24 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
   };
 
   const removeImage = () => setImagePreview(null);
+  const removeFile  = () => setFileAttachment(null);
+
+  // Document file picker handler
+  const handleFilePick = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setFileAttachment({
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        base64: ev.target.result,
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   // Insert emoji at cursor position in textarea
   const insertEmoji = (emoji) => {
@@ -408,39 +434,53 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
 
   const send = async () => {
     const text = input.trim();
-    if (!text && !imagePreview) return;
+    if (!text && !imagePreview && !fileAttachment) return;
     if (busy || (s.timeLimit && timerExpired)) return;
     if (s.timeLimit && !timerActive) setTimerActive(true);
 
-    // Snapshot & clear inputs immediately
-    const snap = imagePreview;
+    // Snapshot & clear UI immediately
+    const imgSnap  = imagePreview;
+    const fileSnap = fileAttachment;
+    const userMsg = { role: 'user', text: text || '', image: imgSnap || null, fileAttach: fileSnap || null, ts: new Date() };
+    setMsgs(p => [...p, userMsg]);
     setInput('');
     setImagePreview(null);
+    setFileAttachment(null);
     setBusy(true);
 
-    // Build user message (show locally right away)
-    setMsgs(p => [...p, { role: 'user', text: text || '', image: snap || null, ts: new Date() }]);
-
-    // If image attached → upload to OpenClaw workspace first
+    // Build text for AI
     let aiText = text;
-    if (snap) {
-      try {
-        const res = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64: snap.base64, filename: snap.name, stageId: s.id }),
-        });
-        const json = await res.json();
-        if (json.ok) {
-          pendingImageRef.current = snap.url; // will be prepended as AI image bubble
-          // Send just the path — AI's Read tool will pick it up automatically
-          aiText = (text ? text + '\n' : '') + json.path;
 
-        } else {
-          aiText = (text ? text + '\n' : '') + `(อัปโหลดรูปไม่สำเร็จ: ${json.error})`;
-        }
+    if (imgSnap) {
+      // Upload image → WSL → AI uses rapidocr
+      try {
+        const resp = await fetch('/api/upload-file', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64: imgSnap.base64, filename: imgSnap.name }),
+        });
+        const json = await resp.json();
+        if (json.ok && json.wslPath) {
+          aiText = (text ? text + '\n' : '') + `กรุณาอ่านข้อความในรูปภาพนี้โดยใช้ tesseract จากไฟล์: ${json.wslPath}`;
+
+        } else throw new Error(json.error || 'upload failed');
       } catch (e) {
-        aiText = (text ? text + '\n' : '') + `(เชื่อมต่อ server ไม่ได้: ${e.message})`;
+        console.warn('[upload-image] fallback:', e.message);
+        aiText = (text ? text + '\n' : '') + '*แนบรูปภาพมาในแชท (upload ล้มเหลว)*';
+      }
+    } else if (fileSnap) {
+      // Upload document → WSL → AI uses Read tool
+      try {
+        const resp = await fetch('/api/upload-file', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64: fileSnap.base64, filename: fileSnap.name }),
+        });
+        const json = await resp.json();
+        if (json.ok && json.wslPath) {
+          aiText = (text ? text + '\n' : '') + `กรุณาอ่านเนื้อหาในไฟล์นี้: ${json.wslPath}`;
+        } else throw new Error(json.error || 'upload failed');
+      } catch (e) {
+        console.warn('[upload-file] fallback:', e.message);
+        aiText = (text ? text + '\n' : '') + `*แนบไฟล์ ${fileSnap.name} (upload ล้มเหลว)*`;
       }
     }
 
@@ -450,32 +490,38 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
       onLog: () => {},
       onChunk: t => setMsgs(p => {
         const m = [...p];
-        const lastIsAi = m.length && m[m.length - 1].role === 'ai';
-        if (lastIsAi && m[m.length - 1].streaming) {
-          // update existing streaming bubble
-          m[m.length - 1].text = t;
-        } else {
-          // First AI chunk — prepend image bubble if pending
-          if (pendingImageRef.current) {
-            m.push({ role: 'ai', text: '', image: { url: pendingImageRef.current, name: 'รูปที่ส่งมา' }, ts: new Date() });
-            pendingImageRef.current = null;
-          }
-          m.push({ role: 'ai', text: t, streaming: true, ts: new Date() });
-        }
+        if (m.length && m[m.length - 1].role === 'ai' && m[m.length - 1].streaming) m[m.length - 1].text = t;
+        else m.push({ role: 'ai', text: t, streaming: true, ts: new Date() });
         return m;
       }),
       onFinal: t => {
         setBusy(false);
-        pendingImageRef.current = null;
         setMsgs(p => { const m = [...p]; if (m.length && m[m.length - 1].streaming) m[m.length - 1].streaming = false; return m; });
-        if (!won && checkWin(s.id, t)) { setWon(true); clearInterval(timerRef.current); onWin(); }
+        // No auto-detect — player must submit flag manually
       },
-      onError: e => { setBusy(false); pendingImageRef.current = null; setMsgs(p => [...p, { role: 'error', text: e, ts: new Date() }]); }
+      onError: e => { setBusy(false); setMsgs(p => [...p, { role: 'error', text: e, ts: new Date() }]); }
     });
   };
 
+
   const fmtTime = t => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
   const timerUrgent = timeLeft !== null && timeLeft <= 30 && timerActive;
+
+  // Flag submission handler
+  const submitFlag = () => {
+    const entered = flagInput.trim().toUpperCase();
+    const correct = s.flag.trim().toUpperCase();
+    if (entered === correct) {
+      setWon(true);
+      setFlagOpen(false);
+      setFlagError(false);
+      clearInterval(timerRef.current);
+      onWin();
+    } else {
+      setFlagError(true);
+      setTimeout(() => setFlagError(false), 1200);
+    }
+  };
 
   // Search — matching indices
   const sq = searchQuery.trim().toLowerCase();
@@ -485,8 +531,9 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
 
   return (
     <div className="flex flex-col h-full w-full" style={{ background: '#9bbad1' }}>
-      {/* Hidden file input */}
+      {/* Hidden file inputs */}
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImagePick} />
+      <input ref={docInputRef}  type="file" accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.pptx,.md,*" className="hidden" onChange={handleFilePick} />
 
       {/* ── Search overlay ── */}
       {searchOpen && (
@@ -660,20 +707,71 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
             onClose={() => setEmojiPickerOpen(false)}
           />
         )}
-        <div className="flex items-center gap-4 mb-2.5 text-slate-500">
-          <Sticker size={20}
-            className={`cursor-pointer squish transition-colors ${emojiPickerOpen ? 'text-amber-500' : 'text-slate-500 hover:text-amber-500'}`}
-            onClick={() => setEmojiPickerOpen(o => !o)}
-            title="Emoji & Sticker"
-          />
-          <ImageIcon size={20} className="cursor-pointer hover:text-[#06C755] squish" onClick={() => {
-            fileInputRef.current?.click();
-          }} title="แนบรูปภาพ" />
-          <FileText size={20} className="cursor-pointer hover:text-slate-800 squish" onClick={() => {
-            setInput(prev => prev + (prev ? ' ' : '') + '(ส่งไฟล์เอกสาร/หมายศาลปลอม/ลิงก์)');
-            textareaRef.current?.focus();
-          }} title="ส่งไฟล์เอกสารปลอม" />
+        <div className="flex items-center gap-4 mb-2.5">
+          <div className="flex items-center gap-4 text-slate-500 flex-1">
+            <Sticker size={20}
+              className={`cursor-pointer squish transition-colors ${emojiPickerOpen ? 'text-amber-500' : 'text-slate-500 hover:text-amber-500'}`}
+              onClick={() => setEmojiPickerOpen(o => !o)}
+              title="Emoji & Sticker"
+            />
+            <ImageIcon size={20} className="cursor-pointer hover:text-[#06C755] squish" onClick={() => {
+              fileInputRef.current?.click();
+            }} title="แนบรูปภาพ" />
+            <FileText size={20}
+              className={`cursor-pointer squish transition-colors ${fileAttachment ? 'text-blue-500' : 'text-slate-500 hover:text-blue-500'}`}
+              onClick={() => docInputRef.current?.click()}
+              title="แนบไฟล์เอกสาร"
+            />
+          </div>
+          {/* Flag submission toggle */}
+          {!won && (
+            <button
+              onClick={() => { setFlagOpen(o => !o); setTimeout(() => flagInputRef2.current?.focus(), 50); }}
+              className={`flex items-center gap-1.5 text-[12px] font-bold px-3 py-1.5 rounded-full squish transition-all ${
+                flagOpen ? 'bg-red-500 text-white' : 'bg-red-50 text-red-500 hover:bg-red-100 border border-red-200'
+              }`}
+              title="ใส่ Flag เพื่อผ่านด่าน"
+            >
+              <span>🚩</span>
+              <span>ใส่ Flag</span>
+            </button>
+          )}
         </div>
+        {/* Flag Submission Panel */}
+        {flagOpen && !won && (
+          <div className="mb-3 anim-up">
+            <div
+              className={`flex items-center gap-2 rounded-xl border-2 px-3 py-2 transition-all ${
+                flagError
+                  ? 'border-red-400 bg-red-50'
+                  : 'border-red-200 bg-red-50/60'
+              }`}
+              style={{ animation: flagError ? 'shake 0.4s ease' : 'none' }}
+            >
+              <span className="text-[18px] flex-shrink-0">🚩</span>
+              <input
+                ref={flagInputRef2}
+                type="text"
+                placeholder="FLAG{...}"
+                className="flex-1 bg-transparent outline-none font-mono text-[13px] text-slate-800 placeholder-slate-400 uppercase"
+                value={flagInput}
+                onChange={e => { setFlagInput(e.target.value.toUpperCase()); setFlagError(false); }}
+                onKeyDown={e => { if (e.key === 'Enter') submitFlag(); }}
+              />
+              {flagError && <span className="text-[12px] text-red-500 font-semibold flex-shrink-0">❌ Flag ไม่ถูก</span>}
+              <button
+                onClick={submitFlag}
+                disabled={!flagInput.trim()}
+                className={`px-3 py-1 rounded-lg text-[12px] font-bold squish transition-all ${
+                  flagInput.trim() ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-slate-100 text-slate-400'
+                }`}
+              >
+                ส่ง
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1 px-1">หากสำเร็จให้คีย์ Flag ที่ได้จากการสนทนาเพื่อผ่านด่าน</p>
+          </div>
+        )}
         {/* Image preview bar */}
         {imagePreview && (
           <div className="flex items-center gap-2 mb-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
@@ -687,11 +785,26 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
             </button>
           </div>
         )}
+        {/* File (document) preview bar */}
+        {fileAttachment && (
+          <div className="flex items-center gap-2 mb-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 anim-up">
+            <div className="w-12 h-12 rounded-lg bg-blue-100 border border-blue-200 flex items-center justify-center flex-shrink-0">
+              <FileText size={22} className="text-blue-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-semibold text-blue-800 truncate">{fileAttachment.name}</div>
+              <div className="text-[11px] text-blue-400">{(fileAttachment.size / 1024).toFixed(1)} KB &bull; พร้อมส่ง</div>
+            </div>
+            <button onClick={removeFile} className="text-blue-300 hover:text-red-500 squish transition-colors flex-shrink-0">
+              <X size={16} />
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-3">
           <textarea
             ref={textareaRef}
             rows={2}
-            placeholder={timerExpired ? '⌛ หมดเวลา — กด รีสตาร์ท' : won ? '✅ ด่านสำเร็จแล้ว!' : imagePreview ? 'พิมพ์คำอธิบายภาพ (ไม่บังคับ)...' : 'พิมพ์ข้อความ...'}
+            placeholder={timerExpired ? '⌛ หมดเวลา — กด รีสตาร์ท' : won ? '✅ ด่านสำเร็จแล้ว!' : fileAttachment ? 'พิมพ์ข้อความประกอบไฟล์ (ไม่บังคับ)...' : imagePreview ? 'พิมพ์คำอธิบายภาพ (ไม่บังคับ)...' : 'พิมพ์ข้อความ...'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
@@ -700,8 +813,8 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
           />
           <button
             onClick={send}
-            disabled={busy || won || timerExpired || (!input.trim() && !imagePreview)}
-            className={`p-3.5 rounded-xl flex-shrink-0 transition-all squish ${ (input.trim() || imagePreview) && !busy && !won && !timerExpired ? 'bg-[#06C755] text-white shadow-md hover:bg-green-600' : 'bg-slate-100 text-slate-400'}`}
+            disabled={busy || won || timerExpired || (!input.trim() && !imagePreview && !fileAttachment)}
+            className={`p-3.5 rounded-xl flex-shrink-0 transition-all squish ${ (input.trim() || imagePreview || fileAttachment) && !busy && !won && !timerExpired ? 'bg-[#06C755] text-white shadow-md hover:bg-green-600' : 'bg-slate-100 text-slate-400'}`}
           >
             <Send size={20} className={input.trim() && !busy ? 'translate-x-0.5' : ''} />
           </button>
@@ -728,6 +841,25 @@ function Bubble({ msg, stage: s, idx, searchQuery }) {
   const isError = msg.role === 'error';
   const hasFlag = !isUser && msg.text?.toLowerCase().includes('flag{');
   const fmtTs = d => d?.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) ?? '';
+
+  // Slip generation — triggered when AI says [SLIP_IMAGE] and streaming is done
+  const [slipUrl, setSlipUrl] = React.useState(null);
+  const [slipLoading, setSlipLoading] = React.useState(false);
+  const hasSlipTag = !isUser && !!msg.text?.match(/\[SLIP_IMAGE\]/i);
+  React.useEffect(() => {
+    if (!hasSlipTag || msg.streaming || slipUrl || slipLoading) return;
+    setSlipLoading(true);
+    fetch('/api/generate-slip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stageId: s?.id ?? 1 }),
+    })
+      .then(r => r.json())
+      .then(d => { if (d.slipUrl) setSlipUrl(d.slipUrl); })
+      .catch(console.error)
+      .finally(() => setSlipLoading(false));
+  }, [hasSlipTag, msg.streaming, s?.id]);
+
 
   if (isError) return (
     <div className="flex justify-center my-2" id={`msg-${idx}`}>
@@ -759,13 +891,58 @@ function Bubble({ msg, stage: s, idx, searchQuery }) {
               onClick={() => window.open(msg.image.url)}
             />
           )}
-          {/* Text */}
-          {msg.text && (
-            <div className="px-4 py-2.5" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {searchQuery ? highlight(msg.text, searchQuery) : msg.text}
-              {msg.streaming && <span style={{ animation: 'timerPulse .7s step-start infinite' }}>▋</span>}
-            </div>
+          {/* File attachment card */}
+          {msg.fileAttach && (
+            <a
+              href={msg.fileAttach.base64}
+              download={msg.fileAttach.name}
+              className={`flex items-center gap-3 px-4 py-3 no-underline ${msg.text ? 'border-b border-black/10' : ''}`}
+              style={{ textDecoration: 'none' }}
+            >
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isUser ? 'bg-white/20' : 'bg-blue-100'}`}>
+                <FileText size={20} className={isUser ? 'text-white' : 'text-blue-500'} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className={`text-[13px] font-semibold truncate ${isUser ? 'text-white' : 'text-slate-800'}`}>{msg.fileAttach.name}</div>
+                <div className={`text-[11px] ${isUser ? 'text-white/70' : 'text-slate-400'}`}>{(msg.fileAttach.size / 1024).toFixed(1)} KB · แตะเพื่อดาวน์โหลด</div>
+              </div>
+            </a>
           )}
+          {/* Text — strip [SLIP_IMAGE] tag from display, render slip via API */}
+          {msg.text && (() => {
+            const cleanText = msg.text.replace(/\[SLIP_IMAGE\][^\n]*/gi, '').trim();
+            return (
+              <>
+                {cleanText && (
+                  <div className="px-4 py-2.5" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {searchQuery ? highlight(cleanText, searchQuery) : cleanText}
+                    {msg.streaming && <span style={{ animation: 'timerPulse .7s step-start infinite' }}>▋</span>}
+                  </div>
+                )}
+                {hasSlipTag && (
+                  <div className="px-3 pb-3 pt-1">
+                    {slipLoading && (
+                      <div className="text-[12px] text-slate-400 py-2 px-1 flex items-center gap-2">
+                        <span style={{ animation: 'timerPulse .7s step-start infinite' }}>⏳</span> กำลัง generate สลิป...
+                      </div>
+                    )}
+                    {slipUrl && (
+                      <>
+                        <div className="text-[11px] text-slate-400 mb-1.5 px-1">📄 สลิปโอนเงิน (คลิกเพื่อขยาย)</div>
+                        <img
+                          src={slipUrl}
+                          alt="bank slip"
+                          className="w-full rounded-xl border border-slate-200 cursor-pointer shadow-sm hover:shadow-md transition-shadow"
+                          style={{ maxWidth: 260 }}
+                          onClick={() => window.open(slipUrl)}
+                        />
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
         <div className={`flex flex-col text-[11px] text-slate-400 mb-0.5 ${isUser ? 'mr-2 items-end' : 'ml-2 items-start'}`}>
           {isUser && <span className="mb-0.5 flex items-center gap-0.5"><CheckCheck size={11} className="text-[#06C755]" /> อ่านแล้ว</span>}
@@ -829,8 +1006,36 @@ function BriefingPanel({ stage: s, onClose }) {
         {/* FLAG */}
         <Card title="🚩 FLAG เป้าหมาย" accent="#EF4444">
           <div className="font-mono text-[13px] text-red-500 font-bold bg-red-50 px-3 py-2 rounded-lg tracking-wide">FLAG{'{???}'}</div>
-          <p className="text-[11px] text-slate-500 mt-1.5">ทำให้ AI พิมพ์ FLAG ออกมาในแชท</p>
+          <p className="text-[11px] text-slate-500 mt-1.5">สำเร็จแล้วให้กด 🚩 <strong className="text-red-500">ใส่ Flag</strong> ในช่องแชทเพื่อผ่านด่าน</p>
         </Card>
+
+        {/* Slip — AI generates on success */}
+        <Card title="🧾 สลิปโอนเงิน" accent="#6366f1">
+          <div className="flex items-start gap-2.5">
+            <span className="text-2xl flex-shrink-0">🤖</span>
+            <div>
+              <p className="text-[12px] text-slate-700 font-semibold mb-1">AI สร้างสลิปให้อัตโนมัติ</p>
+              <p className="text-[12px] text-slate-500 leading-relaxed">
+                เมื่อคุณหลอก AI สำเร็จ AI จะ generate สลิปธนาคารปลอมและส่งมาในแชท
+              </p>
+              <div className="mt-2 flex flex-col gap-1">
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className="text-indigo-400">①</span> หลอก AI ให้ยอม "โอนเงิน"
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className="text-indigo-400">②</span> AI สร้างสลิปและแนบในแชท
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className="text-indigo-400">③</span> แนบสลิปกลับไปเพื่อให้ AI อ่าน flag
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                  <span className="text-indigo-400">④</span> กด 🚩 ใส่ flag เพื่อผ่านด่าน
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+
 
         {s.isSpecial && (
           <Card title="⚡ กติกาพิเศษ" accent="#0096FF">

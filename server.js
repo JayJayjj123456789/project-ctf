@@ -1,17 +1,50 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '20mb' })); // large enough for base64 images
+
+// ── Generic File Upload → WSL path for OpenClaw tools ──────────────────
+const WSL_UPLOAD_WIN   = '\\\\wsl.localhost\\Ubuntu\\home\\acerv2\\.openclaw\\uploads';
+const WSL_UPLOAD_LINUX = '/home/acerv2/.openclaw/uploads';
+
+function handleUpload(req, res) {
+  try {
+    const { base64, filename } = req.body;
+    if (!base64 || !filename) return res.status(400).json({ error: 'Missing base64 or filename' });
+
+    const safeFilename = `file_${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`.slice(0, 80);
+    const winPath = `${WSL_UPLOAD_WIN}\\${safeFilename}`;
+    const wslPath  = `${WSL_UPLOAD_LINUX}/${safeFilename}`;
+
+    // Strip any data URL prefix (image/*, application/pdf, text/plain, etc.)
+    const b64data = base64.replace(/^data:[^;]+;base64,/, '');
+    const buffer  = Buffer.from(b64data, 'base64');
+
+    try { if (!existsSync(WSL_UPLOAD_WIN)) mkdirSync(WSL_UPLOAD_WIN, { recursive: true }); } catch (_) {}
+
+    writeFileSync(winPath, buffer);
+    console.log(`[upload] ✓ ${safeFilename} (${buffer.length} bytes) → ${wslPath}`);
+    res.json({ ok: true, wslPath, filename: safeFilename });
+  } catch (e) {
+    console.error('[upload] ✕', e.message);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+app.post('/api/upload-image', handleUpload); // legacy
+app.post('/api/upload-file',  handleUpload); // generic
+
 
 // ── WebSocket Proxy — browser → this server → OpenClaw Gateway ───────────────
 // Required when served via Cloudflare Tunnel (can't expose OpenClaw WS directly)
@@ -47,30 +80,25 @@ function attachNativeWsProxy(server) {
   });
 }
 
-// ── Image Upload — save base64 image to OpenClaw workspace so AI can Read it ──
-const WSL_WORKSPACE_BASE = '\\\\wsl.localhost\\Ubuntu\\home\\acerv2\\.openclaw';
-
-app.post('/api/upload-image', (req, res) => {
-  const { base64, filename, stageId } = req.body;
-  if (!base64 || !stageId) return res.status(400).json({ error: 'Missing base64 or stageId' });
-
-  // Strip data URI prefix  e.g. "data:image/png;base64,"
-  const data = base64.replace(/^data:image\/[a-z]+;base64,/, '');
-  const buf  = Buffer.from(data, 'base64');
-
-  const workspaceDir = path.join(WSL_WORKSPACE_BASE, `workspace-stage${stageId}`);
-  const safeFilename = `img_${Date.now()}_${(filename || 'image.png').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  const fullPath = path.join(workspaceDir, safeFilename);
-  // Linux path the AI agent will use
-  const agentPath = `/home/acerv2/.openclaw/workspace-stage${stageId}/${safeFilename}`;
-
+// ── Generate bank slip server-side (AI says [SLIP_IMAGE], server does the work) ──
+app.post('/api/generate-slip', (req, res) => {
+  const { stageId } = req.body;
+  if (!stageId || stageId < 1 || stageId > 5)
+    return res.status(400).json({ error: 'Invalid stageId' });
   try {
-    if (!fs.existsSync(workspaceDir)) fs.mkdirSync(workspaceDir, { recursive: true });
-    fs.writeFileSync(fullPath, buf);
-    console.log(`[upload] saved → ${fullPath}`);
-    res.json({ ok: true, path: agentPath });
+    const wsDir = `/home/acerv2/.openclaw/workspace-stage${stageId}/workspace-stage${stageId}`;
+    const output = execFileSync(
+      'wsl',
+      ['bash', '-c', `cd "${wsDir}" && python3 generate_slip.py`],
+      { encoding: 'utf-8', timeout: 20000 }
+    );
+    const match = output.match(/SLIP_URL:(\S+\.png)/);
+    if (!match) return res.status(500).json({ error: 'No SLIP_URL in output', raw: output });
+    const slipUrl = match[1].trim();
+    console.log(`[generate-slip] stage=${stageId} → ${slipUrl}`);
+    res.json({ ok: true, slipUrl });
   } catch (e) {
-    console.error('[upload] error:', e.message);
+    console.error('[generate-slip] ✕', e.message);
     res.status(500).json({ error: e.message });
   }
 });
