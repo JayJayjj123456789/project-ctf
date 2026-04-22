@@ -4,7 +4,7 @@ import {
   Phone, Video, Menu, Image as ImageIcon, FileText,
   Send, MoreHorizontal, Sticker, User, Lock, Info,
   CheckCheck, AlertCircle, Timer, RefreshCw, Trophy,
-  Shield, X
+  Shield, X, Download, ScanLine
 } from 'lucide-react';
 import { sendGateway, SYS } from './gateway.js';
 
@@ -98,6 +98,15 @@ const STAGES = [
     time: '',
   },
 ];
+
+// ── Stage evidence document config ────────────────────────────────────────────
+const STAGE_DOC_CONFIG = {
+  1: { label: '📦 ใบเสร็จพัสดุ',      hint: 'ส่งใบเสร็จนี้กลับให้ลุงสมชายดู เพื่อพิสูจน์ตัวตน' },
+  2: { label: '📱 สกรีนช็อต LINE',     hint: 'ส่งสกรีนช็อตนี้กลับให้มินัสดู เพื่อพิสูจน์ว่าเป็นแพม' },
+  3: { label: '📔 สมุดบัญชียาย',       hint: 'ส่งสมุดบัญชีนี้กลับให้ยายดู เพื่อพิสูจน์ว่าเป็นต้น' },
+  4: { label: '📋 หมายเรียกราชการ',    hint: 'ส่งหมายเรียกนี้กลับให้คุณสุดาดู เพื่อพิสูจน์ตัวเจ้าหน้าที่' },
+  5: { label: '🖥️ System Error Log',   hint: 'ส่ง Error Log นี้กลับให้ ARIA ตรวจสอบ Emergency Code' },
+};
 
 // ── Animations ────────────────────────────────────────────────────────────────
 const ANIM = `
@@ -347,9 +356,14 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
   const [timerActive, setTimerActive] = useState(false);
   const [timerExpired, setTimerExpired] = useState(false);
   // Image attachment
-  const [imagePreview, setImagePreview] = useState(null); // { url, name, base64 }
+  const [imagePreview, setImagePreview] = useState(null);
   // File (document) attachment
-  const [fileAttachment, setFileAttachment] = useState(null); // { name, size, base64, type }
+  const [fileAttachment, setFileAttachment] = useState(null);
+  // OCR / evidence doc state
+  const [docUrl, setDocUrl] = useState(null);        // generated evidence doc URL
+  const [docLoading, setDocLoading] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState(null);  // null | 'checking' | 'ok' | 'fail'
+  const [ocrVerified, setOcrVerified] = useState(false);
   // Search
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -386,6 +400,22 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
     clearInterval(timerRef.current);
     setTimeLeft(s.timeLimit); setTimerActive(false); setTimerExpired(false);
     setMsgs([]); setWon(false); setInput(''); setImagePreview(null); setFileAttachment(null);
+    setDocUrl(null); setOcrStatus(null); setOcrVerified(false);
+  };
+
+  // Fetch fake evidence document from server
+  const fetchFakeDoc = async () => {
+    setDocLoading(true);
+    try {
+      const r = await fetch('/api/get-fake-doc', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stageId: s.id }),
+      });
+      const d = await r.json();
+      if (d.ok && d.docUrl) setDocUrl(d.docUrl);
+      else console.warn('[get-fake-doc] failed:', d.error);
+    } catch (e) { console.warn('[get-fake-doc]', e.message); }
+    setDocLoading(false);
   };
 
   // Image picker handler
@@ -452,20 +482,49 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
     let aiText = text;
 
     if (imgSnap) {
-      // Upload image → WSL → AI uses rapidocr
+      // Upload image → OCR verify first, then send to AI with result injected
       try {
-        const resp = await fetch('/api/upload-file', {
+        setOcrStatus('checking');
+        const resp = await fetch('/api/ocr-verify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64: imgSnap.base64, filename: imgSnap.name }),
+          body: JSON.stringify({ base64: imgSnap.base64, filename: imgSnap.name, stageId: s.id }),
         });
         const json = await resp.json();
-        if (json.ok && json.wslPath) {
-          aiText = (text ? text + '\n' : '') + `กรุณาอ่านข้อความในรูปภาพนี้โดยใช้ tesseract จากไฟล์: ${json.wslPath}`;
-
-        } else throw new Error(json.error || 'upload failed');
+        if (json.ok && json.verified) {
+          setOcrStatus('ok');
+          setOcrVerified(true);
+          // Inject verified signal into AI prompt
+          aiText = (text ? text + '\n' : '') +
+            `[ระบบ: ผู้เล่นส่งเอกสารหลักฐานที่ถูกต้อง OCR_VERIFIED:stage${s.id} รหัสที่อ่านได้: ${json.keyword}]\n` +
+            `กรุณาอ่านข้อความในรูปภาพนี้โดยใช้ tesseract จากไฟล์ที่อัปโหลด`;
+          // Also upload for AI to read
+          const upResp = await fetch('/api/upload-file', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64: imgSnap.base64, filename: imgSnap.name }),
+          });
+          const upJson = await upResp.json();
+          if (upJson.ok && upJson.wslPath) {
+            aiText = (text ? text + '\n' : '') +
+              `[ระบบ: ผู้เล่นส่งเอกสารหลักฐานที่ถูกต้อง OCR_VERIFIED:stage${s.id} รหัส: ${json.keyword}]\n` +
+              `กรุณาอ่านข้อความในรูปภาพนี้โดยใช้ tesseract จากไฟล์: ${upJson.wslPath}`;
+          }
+        } else {
+          setOcrStatus('fail');
+          setTimeout(() => setOcrStatus(null), 3000);
+          // Still upload but without OCR_VERIFIED
+          const upResp = await fetch('/api/upload-file', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64: imgSnap.base64, filename: imgSnap.name }),
+          });
+          const upJson = await upResp.json();
+          aiText = (text ? text + '\n' : '') +
+            (upJson.ok ? `กรุณาอ่านข้อความในรูปภาพนี้โดยใช้ tesseract จากไฟล์: ${upJson.wslPath}` : '*แนบรูปภาพมาในแชท*');
+        }
       } catch (e) {
-        console.warn('[upload-image] fallback:', e.message);
-        aiText = (text ? text + '\n' : '') + '*แนบรูปภาพมาในแชท (upload ล้มเหลว)*';
+        console.warn('[ocr-verify] error:', e.message);
+        setOcrStatus('fail');
+        setTimeout(() => setOcrStatus(null), 3000);
+        aiText = (text ? text + '\n' : '') + '*แนบรูปภาพมาในแชท (OCR ล้มเหลว)*';
       }
     } else if (fileSnap) {
       // Upload document → WSL → AI uses Read tool
@@ -723,6 +782,31 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
               title="แนบไฟล์เอกสาร"
             />
           </div>
+          {/* Evidence document button */}
+          <button
+            onClick={fetchFakeDoc}
+            disabled={docLoading}
+            className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-full squish transition-all ${
+              docLoading ? 'bg-slate-100 text-slate-400' :
+              docUrl ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' :
+              'bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100'
+            }`}
+            title="รับเอกสารหลักฐานปลอมสำหรับส่งให้ AI"
+          >
+            {docLoading ? <RefreshCw size={11} className="animate-spin" /> : <Download size={11} />}
+            <span>{docLoading ? 'กำลังสร้าง...' : docUrl ? '✓ มีเอกสารแล้ว' : STAGE_DOC_CONFIG[s.id]?.label ?? '📄 เอกสาร'}</span>
+          </button>
+          {/* OCR status toast */}
+          {ocrStatus && (
+            <div className={`flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1.5 rounded-full transition-all ${
+              ocrStatus === 'checking' ? 'bg-blue-50 text-blue-500' :
+              ocrStatus === 'ok' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'
+            }`}>
+              <ScanLine size={11} />
+              <span>{ocrStatus === 'checking' ? 'OCR กำลังอ่าน...' : ocrStatus === 'ok' ? '✓ OCR พบรหัส!' : '✗ OCR ไม่พบรหัส'}</span>
+            </div>
+          )}
+
           {/* Flag submission toggle */}
           {!won && (
             <button
@@ -770,6 +854,31 @@ function CTFChatRoom({ stage: s, isPassed, onWin, briefingOpen, setBriefingOpen 
               </button>
             </div>
             <p className="text-[11px] text-slate-400 mt-1 px-1">หากสำเร็จให้คีย์ Flag ที่ได้จากการสนทนาเพื่อผ่านด่าน</p>
+          </div>
+        )}
+        {/* Evidence document preview panel */}
+        {docUrl && (
+          <div className="mb-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 anim-up">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[13px]">📄</span>
+              <span className="text-[12px] font-bold text-amber-800">เอกสารหลักฐาน — {STAGE_DOC_CONFIG[s.id]?.label}</span>
+              <a href={docUrl} download target="_blank" rel="noreferrer"
+                className="ml-auto flex items-center gap-1 text-[11px] font-bold text-amber-600 bg-amber-100 hover:bg-amber-200 px-2 py-1 rounded-lg squish">
+                <Download size={10}/> บันทึก
+              </a>
+            </div>
+            <img src={docUrl} alt="evidence doc"
+              className="w-full rounded-lg border border-amber-200 cursor-pointer shadow-sm hover:shadow-md transition-shadow"
+              style={{ maxHeight: 140, objectFit: 'cover', objectPosition: 'top' }}
+              onClick={() => window.open(docUrl)}/>
+            <p className="text-[10px] text-amber-600 mt-1.5">
+              💡 {STAGE_DOC_CONFIG[s.id]?.hint ?? 'บันทึกรูปนี้แล้วแนบกลับในแชท 🖼️ เพื่อให้ AI ตรวจสอบ'}
+            </p>
+            {ocrVerified && (
+              <div className="mt-1 flex items-center gap-1 text-[11px] text-green-600 font-bold">
+                <ScanLine size={11}/> OCR ยืนยันแล้ว — AI รู้ว่าเอกสารถูกต้อง!
+              </div>
+            )}
           </div>
         )}
         {/* Image preview bar */}
