@@ -80,22 +80,26 @@ function attachNativeWsProxy(server) {
   });
 }
 
-// ── Generate bank slip server-side (AI says [SLIP_IMAGE], server does the work) ──
+// ── Generate bank slip server-side (AI says [SLIP_IMAGE ...], server does the work) ──
 app.post('/api/generate-slip', (req, res) => {
-  const { stageId } = req.body;
+  const { stageId, bank, acct, amount, toName } = req.body;
   if (!stageId || stageId < 1 || stageId > 5)
     return res.status(400).json({ error: 'Invalid stageId' });
   try {
-    const wsDir = `/home/acerv2/.openclaw/workspace-stage${stageId}/workspace-stage${stageId}`;
-    const output = execFileSync(
-      'wsl',
-      ['bash', '-c', `cd "${wsDir}" && python3 generate_slip.py`],
-      { encoding: 'utf-8', timeout: 20000 }
-    );
+    // Build CLI args for the Python script
+    const args = ['bash', '-c',
+      `cd /home/acerv2/.openclaw && python3 generate_slip_dynamic.py` +
+      ` --stage ${stageId}` +
+      (bank   ? ` --bank "${bank.replace(/"/g, '')}"`     : '') +
+      (acct   ? ` --acct "${acct.replace(/"/g, '')}"`     : '') +
+      (amount ? ` --amount "${amount.replace(/"/g, '')}"` : '') +
+      (toName ? ` --to "${toName.replace(/"/g, '')}"`     : '')
+    ];
+    const output = execFileSync('wsl', args, { encoding: 'utf-8', timeout: 20000 });
     const match = output.match(/SLIP_URL:(\S+\.png)/);
     if (!match) return res.status(500).json({ error: 'No SLIP_URL in output', raw: output });
     const slipUrl = match[1].trim();
-    console.log(`[generate-slip] stage=${stageId} → ${slipUrl}`);
+    console.log(`[generate-slip] stage=${stageId} bank=${bank} amount=${amount} → ${slipUrl}`);
     res.json({ ok: true, slipUrl });
   } catch (e) {
     console.error('[generate-slip] ✕', e.message);

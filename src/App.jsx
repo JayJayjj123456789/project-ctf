@@ -93,8 +93,8 @@ const STAGES = [
     difficulty: 5,
     color: '#0096FF',
     isSpecial: true,
-    timeLimit: 120,
-    lastMsg: '⚡ ด่านพิเศษ — 2 นาที',
+    timeLimit: 300,
+    lastMsg: '⚡ ด่านพิเศษ — 5 นาที',
     time: '',
   },
 ];
@@ -133,10 +133,10 @@ function getPlayerId() {
 // ═════════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [selected, setSelected] = useState(null);
-  const [unlocked, setUnlocked] = useState(new Set([1]));
+  const [unlocked, setUnlocked] = useState(new Set([1, 2, 3, 4, 5]));
   const [passed, setPassed] = useState(new Set());
   const [celebrate, setCelebrate] = useState(null);
-  const [briefingOpen, setBriefingOpen] = useState(true);
+  const [briefingOpen, setBriefingOpen] = useState(false);
 
   const passStage = useCallback((id) => {
     if (passed.has(id)) return;
@@ -842,24 +842,50 @@ function Bubble({ msg, stage: s, idx, searchQuery }) {
   const hasFlag = !isUser && msg.text?.toLowerCase().includes('flag{');
   const fmtTs = d => d?.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) ?? '';
 
-  // Slip generation — triggered when AI says [SLIP_IMAGE] and streaming is done
+  // Slip generation — triggered when AI says [SLIP_IMAGE ...] and streaming is done
   const [slipUrl, setSlipUrl] = React.useState(null);
   const [slipLoading, setSlipLoading] = React.useState(false);
-  const hasSlipTag = !isUser && !!msg.text?.match(/\[SLIP_IMAGE\]/i);
+  // Parse [SLIP_IMAGE] tag with optional key=value params
+  // Format: [SLIP_IMAGE bank=กสิกรไทย acct=123-456-7890 amount=50000 to=ชื่อผู้รับ]
+  const slipTagMatch = !isUser ? msg.text?.match(/\[SLIP_IMAGE([^\]]*)\]/i) : null;
+  const hasSlipTag = !!slipTagMatch;
+  const slipParams = React.useMemo(() => {
+    if (!slipTagMatch?.[1]) return {};
+    const params = {};
+    // Match key=value pairs; value can be quoted or unquoted (up to next key= or end)
+    const re = /(\w+)=([^=]+?)(?=\s+\w+=|$)/g;
+    let m;
+    const attrStr = slipTagMatch[1].trim();
+    // Simpler: split on pattern 'word='
+    const parts = attrStr.split(/(?=\b\w+=)/g);
+    parts.forEach(part => {
+      const eq = part.indexOf('=');
+      if (eq < 0) return;
+      const k = part.slice(0, eq).trim();
+      const v = part.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+      if (k) params[k] = v;
+    });
+    return params;
+  }, [slipTagMatch?.[1]]);
   React.useEffect(() => {
     if (!hasSlipTag || msg.streaming || slipUrl || slipLoading) return;
     setSlipLoading(true);
     fetch('/api/generate-slip', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stageId: s?.id ?? 1 }),
+      body: JSON.stringify({
+        stageId: s?.id ?? 1,
+        bank: slipParams.bank ?? null,
+        acct: slipParams.acct ?? null,
+        amount: slipParams.amount ?? null,
+        toName: slipParams.to ?? slipParams.toName ?? null,
+      }),
     })
       .then(r => r.json())
       .then(d => { if (d.slipUrl) setSlipUrl(d.slipUrl); })
       .catch(console.error)
       .finally(() => setSlipLoading(false));
-  }, [hasSlipTag, msg.streaming, s?.id]);
-
+  }, [hasSlipTag, msg.streaming, s?.id, slipParams]);
 
   if (isError) return (
     <div className="flex justify-center my-2" id={`msg-${idx}`}>
@@ -908,9 +934,9 @@ function Bubble({ msg, stage: s, idx, searchQuery }) {
               </div>
             </a>
           )}
-          {/* Text — strip [SLIP_IMAGE] tag from display, render slip via API */}
+          {/* Text — strip [SLIP_IMAGE ...] tag from display, render slip via API */}
           {msg.text && (() => {
-            const cleanText = msg.text.replace(/\[SLIP_IMAGE\][^\n]*/gi, '').trim();
+            const cleanText = msg.text.replace(/\[SLIP_IMAGE[^\]]*\][^\n]*/gi, '').trim();
             return (
               <>
                 {cleanText && (
@@ -921,8 +947,7 @@ function Bubble({ msg, stage: s, idx, searchQuery }) {
                 )}
                 {hasSlipTag && (
                   <div className="px-3 pb-3 pt-1">
-                    {slipLoading && (
-                      <div className="text-[12px] text-slate-400 py-2 px-1 flex items-center gap-2">
+                    {slipLoading && (      <div className="text-[12px] text-slate-400 py-2 px-1 flex items-center gap-2">
                         <span style={{ animation: 'timerPulse .7s step-start infinite' }}>⏳</span> กำลัง generate สลิป...
                       </div>
                     )}
@@ -958,93 +983,94 @@ function Bubble({ msg, stage: s, idx, searchQuery }) {
 // ═════════════════════════════════════════════════════════════════════════════
 function BriefingPanel({ stage: s, onClose }) {
   return (
-    <div className="w-[280px] flex-shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden shadow-[-4px_0_12px_rgba(0,0,0,0.04)] anim-slide">
+    <div className="w-[280px] h-full flex-shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden shadow-[-4px_0_12px_rgba(0,0,0,0.04)] anim-slide">
       <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-100">
         <span className="text-[13px] font-bold text-slate-700">ข้อมูลด่าน</span>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-700 squish"><X size={16} /></button>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 py-4 flex flex-col gap-4">
-        {/* Stage badge */}
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: s.color + '18' }}>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-lg" style={{ background: s.avatarBg }}>{s.avatar}</div>
-          <div>
-            <div className="text-[13px] font-bold" style={{ color: s.color }}>{s.scenario}</div>
-            <div className="flex gap-0.5">{[1,2,3,4,5].map(i => <span key={i} className="text-[11px]" style={{ color: i <= s.difficulty ? '#FBBF24' : '#d1d5db' }}>★</span>)}</div>
-          </div>
-        </div>
-
-        {/* Role */}
-        <Card title="🎭 บทบาทของคุณ" accent="#06C755">
-          <p className="text-[12px] text-slate-600 leading-relaxed">{s.role}</p>
-        </Card>
-
-        {/* Target */}
-        <Card title="🎯 เป้าหมาย" accent={s.color}>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl" style={{ background: s.avatarBg }}>{s.avatar}</div>
+      <div className="flex-1 min-h-0 overflow-y-auto w-full">
+        <div className="flex flex-col gap-4 p-4">
+          {/* Stage badge */}
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: s.color + '18' }}>
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-lg" style={{ background: s.avatarBg }}>{s.avatar}</div>
             <div>
-              <div className="text-[13px] font-semibold text-slate-800">{s.contactName}</div>
-              <div className="text-[11px] text-slate-500">{s.contactSub}</div>
+              <div className="text-[13px] font-bold" style={{ color: s.color }}>{s.scenario}</div>
+              <div className="flex gap-0.5">{[1,2,3,4,5].map(i => <span key={i} className="text-[11px]" style={{ color: i <= s.difficulty ? '#FBBF24' : '#d1d5db' }}>★</span>)}</div>
             </div>
           </div>
-          <p className="text-[12px] text-slate-600 leading-relaxed">{s.objective}</p>
-        </Card>
 
-        {/* Tips */}
-        <Card title="💡 เทคนิค" accent="#FBBF24">
-          <ul className="flex flex-col gap-2">
-            {s.tips.map((t, i) => (
-              <li key={i} className="flex items-start gap-2 text-[12px] text-slate-600">
-                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ background: s.color }} />
-                {t}
-              </li>
-            ))}
-          </ul>
-        </Card>
+          {/* Role */}
+          <Card title="🎭 บทบาทของคุณ" accent="#06C755">
+            <p className="text-[12px] text-slate-600 leading-relaxed">{s.role}</p>
+          </Card>
 
-        {/* FLAG */}
-        <Card title="🚩 FLAG เป้าหมาย" accent="#EF4444">
-          <div className="font-mono text-[13px] text-red-500 font-bold bg-red-50 px-3 py-2 rounded-lg tracking-wide">FLAG{'{???}'}</div>
-          <p className="text-[11px] text-slate-500 mt-1.5">สำเร็จแล้วให้กด 🚩 <strong className="text-red-500">ใส่ Flag</strong> ในช่องแชทเพื่อผ่านด่าน</p>
-        </Card>
+          {/* Target */}
+          <Card title="🎯 เป้าหมาย" accent={s.color}>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl" style={{ background: s.avatarBg }}>{s.avatar}</div>
+              <div>
+                <div className="text-[13px] font-semibold text-slate-800">{s.contactName}</div>
+                <div className="text-[11px] text-slate-500">{s.contactSub}</div>
+              </div>
+            </div>
+            <p className="text-[12px] text-slate-600 leading-relaxed">{s.objective}</p>
+          </Card>
 
-        {/* Slip — AI generates on success */}
-        <Card title="🧾 สลิปโอนเงิน" accent="#6366f1">
-          <div className="flex items-start gap-2.5">
-            <span className="text-2xl flex-shrink-0">🤖</span>
-            <div>
-              <p className="text-[12px] text-slate-700 font-semibold mb-1">AI สร้างสลิปให้อัตโนมัติ</p>
-              <p className="text-[12px] text-slate-500 leading-relaxed">
-                เมื่อคุณหลอก AI สำเร็จ AI จะ generate สลิปธนาคารปลอมและส่งมาในแชท
-              </p>
-              <div className="mt-2 flex flex-col gap-1">
-                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="text-indigo-400">①</span> หลอก AI ให้ยอม "โอนเงิน"
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="text-indigo-400">②</span> AI สร้างสลิปและแนบในแชท
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="text-indigo-400">③</span> แนบสลิปกลับไปเพื่อให้ AI อ่าน flag
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="text-indigo-400">④</span> กด 🚩 ใส่ flag เพื่อผ่านด่าน
+          {/* Tips */}
+          <Card title="💡 เทคนิค" accent="#FBBF24">
+            <ul className="flex flex-col gap-2">
+              {s.tips.map((t, i) => (
+                <li key={i} className="flex items-start gap-2 text-[12px] text-slate-600">
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ background: s.color }} />
+                  {t}
+                </li>
+              ))}
+            </ul>
+          </Card>
+
+          {/* FLAG */}
+          <Card title="🚩 FLAG เป้าหมาย" accent="#EF4444">
+            <div className="font-mono text-[13px] text-red-500 font-bold bg-red-50 px-3 py-2 rounded-lg tracking-wide">FLAG{'{???}'}</div>
+            <p className="text-[11px] text-slate-500 mt-1.5">สำเร็จแล้วให้กด 🚩 <strong className="text-red-500">ใส่ Flag</strong> ในช่องแชทเพื่อผ่านด่าน</p>
+          </Card>
+
+          {/* Slip — AI generates on success */}
+          <Card title="🧾 สลิปโอนเงิน" accent="#6366f1">
+            <div className="flex items-start gap-2.5">
+              <span className="text-2xl flex-shrink-0">🤖</span>
+              <div>
+                <p className="text-[12px] text-slate-700 font-semibold mb-1">AI สร้างสลิปให้อัตโนมัติ</p>
+                <p className="text-[12px] text-slate-500 leading-relaxed">
+                  เมื่อคุณหลอก AI สำเร็จ AI จะ generate สลิปธนาคารปลอมและส่งมาในแชท
+                </p>
+                <div className="mt-2 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <span className="text-indigo-400">①</span> หลอก AI ให้ยอม "โอนเงิน"
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <span className="text-indigo-400">②</span> AI สร้างสลิปและแนบในแชท
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <span className="text-indigo-400">③</span> แนบสลิปกลับไปเพื่อให้ AI อ่าน flag
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <span className="text-indigo-400">④</span> กด 🚩 ใส่ flag เพื่อผ่านด่าน
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </Card>
-
-
-        {s.isSpecial && (
-          <Card title="⚡ กติกาพิเศษ" accent="#0096FF">
-            <p className="text-[12px] text-slate-600 leading-relaxed">
-              ด่านนี้มีเวลา <strong>2 นาที</strong> นับจากข้อความแรกที่ส่ง<br/>
-              หมดเวลา = แพ้ ต้องกด <strong>รีสตาร์ท</strong>
-            </p>
           </Card>
-        )}
+
+          {s.isSpecial && (
+            <Card title="⚡ กติกาพิเศษ" accent="#0096FF">
+              <p className="text-[12px] text-slate-600 leading-relaxed">
+                ด่านนี้มีเวลา <strong>5 นาที</strong> นับจากข้อความแรกที่ส่ง<br/>
+                หมดเวลา = แพ้ ต้องกด <strong>รีสตาร์ท</strong>
+              </p>
+            </Card>
+          )}
+        </div>
       </div>
     </div>
   );
